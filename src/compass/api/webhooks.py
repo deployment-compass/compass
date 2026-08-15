@@ -14,7 +14,6 @@ from compass.ingestion.adaptors.github import GitHubAdaptor
 from compass.ingestion.adaptors.argocd import ArgoCDAdaptor
 from compass.ingestion.adaptors.kubernetes_watch import KubernetesWatchAdaptor
 from compass.ingestion.adaptors.test_reports import TestReportAdaptor
-from compass.ingestion.adaptors.grafana_alerts import GrafanaAlertAdaptor
 from compass.ingestion.adaptors.base import AdaptorError
 from compass.ingestion.collector import collector
 
@@ -25,7 +24,6 @@ _github_adaptor = GitHubAdaptor()
 _argocd_adaptor = ArgoCDAdaptor()
 _k8s_adaptor = KubernetesWatchAdaptor()
 _test_report_adaptor = TestReportAdaptor()
-_grafana_adaptor = GrafanaAlertAdaptor()
 
 
 @router.post("/github", status_code=status.HTTP_202_ACCEPTED)
@@ -67,27 +65,3 @@ async def test_report_webhook(request: Request):
     return {"status": "accepted"}
 
 
-@router.post("/grafana-alerts", status_code=status.HTTP_202_ACCEPTED)
-async def grafana_alerts_webhook(request: Request):
-    """
-    Point Grafana's webhook contact point at this route. A single call can
-    batch several alerts (one per rule in the firing group), so this
-    fans out to the collector individually — one bad alert entry doesn't
-    drop the rest of the batch.
-    """
-    raw = await request.json()
-    try:
-        events = _grafana_adaptor.parse_batch(raw)
-    except AdaptorError:
-        logger.exception("bad grafana webhook payload")
-        return {"status": "ignored"}
-
-    accepted = 0
-    for event in events:
-        try:
-            await collector.ingest(event)
-            accepted += 1
-        except Exception:
-            logger.exception("failed to enqueue grafana alert, fingerprint in raw_ref=%s", event.raw_ref)
-
-    return {"status": "accepted", "count": accepted, "total": len(events)}

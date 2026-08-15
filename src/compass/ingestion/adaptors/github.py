@@ -20,11 +20,11 @@ class GitHubAdaptor(PushAdapter):
         """
         raw is a GitHub deployment_status webhook payload, e.g.:
         {
-          "action": "created",
-          "deployment": {"id": 123, "sha": "abc123", "environment": "prod"},
-          "deployment_status": {"state": "success", "description": "..."},
-          "repository": {"name": "payments-api"},
-          "commits": [{"message": "fix: retry logic"}]
+            "action": "created",
+            "deployment": {"id": 123, "sha": "abc123", "environment": "prod"},
+            "deployment_status": {"state": "success", "description": "..."},
+            "repository": {"name": "payments-api"},
+            "commits": [{"message": "fix: retry logic"}]
         }
         """
         try:
