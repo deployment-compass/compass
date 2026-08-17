@@ -25,13 +25,6 @@ class MetricType(str, Enum):
     MEMORY_USAGE = "memory_usage"
 
 
-class DataSource(str, Enum):
-    """Where a given sample's value actually came from."""
-    RECORDING_RULE = "recording_rule"
-    DIRECT_QUERY = "direct_query"
-    UNAVAILABLE = "unavailable"
-
-
 @dataclass(frozen=True)
 class LabelSchema:
     """
@@ -47,33 +40,3 @@ class LabelSchema:
     memory_metric: str           # e.g. "container_memory_working_set_bytes"
     environment_label: Optional[str] = None  # e.g. "environment", "env" — None if unused
 
-
-@dataclass
-class MetricSample:
-    """A single normalized (metric, target) -> value reading."""
-    metric: MetricType
-    target: str                       # the grouping label's value (service/job/etc name)
-    value: Optional[float]
-    source: DataSource
-    promql: str
-    raw_label: str = ""               # which label key produced `target`
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-@dataclass
-class CollectionResult:
-    """Everything gathered in one collection cycle, plus partial-failure info."""
-    architecture: ArchitectureMode
-    samples: list[MetricSample]
-    errors: list[str] = field(default_factory=list)
-
-    def to_normalized_dict(self) -> dict[str, dict[str, Optional[float]]]:
-        """
-        Flatten into `{target: {metric_name: value}}`, the shape the
-        anomaly-detection layer actually wants — independent of which
-        source or label produced each sample.
-        """
-        out: dict[str, dict[str, Optional[float]]] = {}
-        for s in self.samples:
-            out.setdefault(s.target, {})[s.metric.value] = s.value
-        return out

@@ -69,14 +69,10 @@ class LabelDiscovery:
         cpu_metric, cpu_arch = await self._first_present_metric(_CPU_METRIC_CANDIDATES)
         mem_metric, mem_arch = await self._first_present_metric(_MEMORY_METRIC_CANDIDATES)
 
-        # Trust metric-family presence over label guessing for the
-        # architecture verdict: container_* metrics existing is a much
-        # stronger signal of "this is containerized/k8s" than any label.
         architecture = cpu_arch or mem_arch or ArchitectureMode.UNKNOWN
         process_label = await self._first_populated_label(_PROCESS_LABEL_CANDIDATES)
-        # Optional: only some deployments carry an environment/env label at
-        # all. None here just means query() won't add that matcher.
-        environment_label = await self._first_populated_label(_ENVIRONMENT_LABEL_CANDIDATES)
+        
+        
 
         schema = LabelSchema(
             architecture=architecture,

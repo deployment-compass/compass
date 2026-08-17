@@ -34,10 +34,7 @@ from typing import Optional
 import httpx
 
 from .prom_models import (
-    CollectionResult,
-    DataSource,
     LabelSchema,
-    MetricSample,
     MetricType,
 )
 from .prom_label_discovery import LabelDiscovery
@@ -174,88 +171,8 @@ class PrometheusAdapter:
         self._ensure_client()
         return await self._discovery.discover(force=force_refresh)
 
-    async def collect(
-        self,
-        metrics: tuple[MetricType, ...] = ALL_METRICS,
-        window: str = "5m",
-    ) -> CollectionResult:
-        self._ensure_client()
-        schema = await self._discovery.discover()
-
-        raw_results = await asyncio.gather(
-            *(self._collect_one(m, schema, window) for m in metrics),
-            return_exceptions=True,
-        )
-
-        samples: list[MetricSample] = []
-        errors: list[str] = []
-        for metric, res in zip(metrics, raw_results):
-            if isinstance(res, Exception):
-                errors.append(f"{metric.value}: {res!r}")
-                continue
-            samples.extend(res)
-
-        return CollectionResult(architecture=schema.architecture, samples=samples, errors=errors)
-
-    async def _collect_one(
-        self, metric: MetricType, schema: LabelSchema, window: str
-    ) -> list[MetricSample]:
-        label_key = self._label_for(metric, schema)
-
-        rule_name = await self._rule_resolver.resolve(metric, label_hint=label_key)
-        if rule_name:
-            samples = await self._run_instant_vector(
-                rule_name, metric, DataSource.RECORDING_RULE, label_key
-            )
-            if samples:
-                return samples
-
-        promql = PromQLBuilder.build(metric, schema, window=window)
-        return await self._run_instant_vector(promql, metric, DataSource.DIRECT_QUERY, label_key)
-
     @staticmethod
     def _label_for(metric: MetricType, schema: LabelSchema) -> str:
         if metric in (MetricType.CPU_USAGE, MetricType.MEMORY_USAGE):
             return schema.process_group_label
         return schema.http_group_label
-
-    async def _run_instant_vector(
-        self, promql: str, metric: MetricType, source: DataSource, label_key: str
-    ) -> list[MetricSample]:
-        resp = await self._client.get(
-            f"{self._base_url}/api/v1/query", params={"query": promql}
-        )
-        resp.raise_for_status()
-        vector = resp.json().get("data", {}).get("result", [])
-
-        samples: list[MetricSample] = []
-        for entry in vector:
-            labels = entry.get("metric", {})
-            target = self._extract_target(labels, label_key)
-            try:
-                value = float(entry["value"][1])
-            except (KeyError, IndexError, ValueError, TypeError):
-                value = None
-            samples.append(
-                MetricSample(
-                    metric=metric,
-                    target=target,
-                    value=value,
-                    source=source,
-                    promql=promql,
-                    raw_label=label_key,
-                )
-            )
-        return samples
-
-    @staticmethod
-    def _extract_target(labels: dict, label_key: str) -> str:
-        if label_key in labels:
-            return labels[label_key]
-        for fallback in _TARGET_LABEL_FALLBACKS:
-            if fallback in labels:
-                return labels[fallback]
-        for key, value in labels.items():
-            if not key.startswith("__"):
-                return value
-        return "unknown"
