@@ -10,27 +10,25 @@ import logging
 
 from fastapi import APIRouter, Request, status
 
-from compass.ingestion.adaptors.github import GitHubAdaptor
+from compass.ingestion.adaptors.github import GitHubActionsAdaptor
 from compass.ingestion.adaptors.argocd import ArgoCDAdaptor
 from compass.ingestion.adaptors.kubernetes_watch import KubernetesWatchAdaptor
-from compass.ingestion.adaptors.test_reports import TestReportAdaptor
 from compass.ingestion.adaptors.base import AdaptorError
 from compass.ingestion.collector import collector
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
-_github_adaptor = GitHubAdaptor()
+_githubActions_adaptor = GitHubActionsAdaptor()
 _argocd_adaptor = ArgoCDAdaptor()
 _k8s_adaptor = KubernetesWatchAdaptor()
-_test_report_adaptor = TestReportAdaptor()
 
 
 @router.post("/github", status_code=status.HTTP_202_ACCEPTED)
 async def github_webhook(request: Request):
     raw = await request.json()
     try:
-        event = _github_adaptor.normalize(raw)
+        event = _githubActions_adaptor.normalize(raw)
     except AdaptorError:
         logger.exception("bad github webhook payload")
         return {"status": "ignored"}
@@ -55,13 +53,6 @@ async def kubernetes_event(request: Request):
     """Called by a small sidecar/relay that forwards watch-stream events over HTTP."""
     raw = await request.json()
     await collector.ingest_raw(_k8s_adaptor, raw)
-    return {"status": "accepted"}
-
-
-@router.post("/test-report", status_code=status.HTTP_202_ACCEPTED)
-async def test_report_webhook(request: Request):
-    raw = await request.json()
-    await collector.ingest_raw(_test_report_adaptor, raw)
     return {"status": "accepted"}
 
 

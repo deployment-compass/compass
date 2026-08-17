@@ -29,10 +29,10 @@ async def process(event: NormalizedEvent) -> bool:
         False if it was a duplicate and got dropped.
         Never raises on a duplicate — that's an expected, routine outcome, not an error.
     """
-    is_new = await claim_once(event.dedupe_key)
-    if not is_new:
-        logger.info("dropping duplicate event, dedupe_key=%s", event.dedupe_key)
-        return False
+    # is_new = await claim_once(event.dedupe_key)
+    # if not is_new:
+    #     logger.info("dropping duplicate event, dedupe_key=%s", event.dedupe_key)
+    #     return False
 
     envelope = Envelope(
         service=event.service,
@@ -40,7 +40,7 @@ async def process(event: NormalizedEvent) -> bool:
         emitted_by="normalizer",
         payload=event.model_dump(mode="json"),
     )
-    await publish(ROUTING_KEY, envelope)
+    # await publish(ROUTING_KEY, envelope)
     logger.info(
         "published normalized event: source=%s type=%s service=%s",
         event.source, event.event_type, event.service,

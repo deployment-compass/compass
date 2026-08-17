@@ -6,8 +6,6 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
-      PROMETHEUS_URL: http://prometheus:9090
-      LOKI_URL: http://loki:3100
     ports:
       - "8000:8000"
     depends_on:
@@ -24,13 +22,3 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
-
-  prometheus:
-    image: dhi.io/prometheus:3.13
-    ports:
-      - "9090:9090"
-
-  loki:
-    image: dhi.io/loki:3
-    ports:
-      - "3100:3100"

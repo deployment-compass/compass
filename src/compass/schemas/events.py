@@ -41,6 +41,4 @@ class NormalizedEvent(BaseModel):
     environment: str = "prod"
     deployment_id: Optional[str] = None
     commit_sha: Optional[str] = None
-    changed_files: list[str] = Field(default_factory=list)
-    commit_message: Optional[str] = None
     dedupe_key: str = Field(..., description="stable per-event id used for idempotency")
