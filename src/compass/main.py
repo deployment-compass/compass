@@ -9,6 +9,7 @@ from compass.ingestion.collector import collector
 from compass.ingestion.adaptors.prometheous.prom_adaptor import PrometheusAdapter
 from compass.ingestion.adaptors.loki.loki_adaptor import LokiAdapter
 from compass.config import settings
+import asyncio
 
 import uvicorn
 
