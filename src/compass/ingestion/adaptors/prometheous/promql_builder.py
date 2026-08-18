@@ -97,17 +97,16 @@ class PromQLBuilder:
     @staticmethod
     def _cpu_usage(schema: LabelSchema, window: str, matchers: Matchers) -> str:
         label = schema.process_group_label
-        is_container = schema.cpu_metric == "container_cpu_usage_seconds_total"
-        base = 'container!=""' if is_container else ""
-        selector = PromQLBuilder._selector(schema.cpu_metric, base, matchers)
+        # Some cAdvisor deployments do not expose a `container` label;
+        # filtering on `container!=""` would drop every series.
+        selector = PromQLBuilder._selector(schema.cpu_metric, "", matchers)
         return f"sum(rate({selector}[{window}])) by ({label})"
 
     @staticmethod
     def _memory_usage(schema: LabelSchema, window: str, matchers: Matchers) -> str:  # noqa: ARG004
         label = schema.process_group_label
-        is_container = schema.memory_metric == "container_memory_working_set_bytes"
-        base = 'container!=""' if is_container else ""
-        selector = PromQLBuilder._selector(schema.memory_metric, base, matchers)
+        # Same rationale as CPU: do not assume `container` label exists.
+        selector = PromQLBuilder._selector(schema.memory_metric, "", matchers)
         return f"sum({selector}) by ({label})"
 
     # -- selector assembly ----------------------------------------------

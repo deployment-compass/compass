@@ -128,8 +128,31 @@ class PrometheusAdapter:
         label_key = self._label_for(metric, schema)
         matchers = self._target_matchers(schema, label_key, service, environment)
 
+        value = await self._query_with_fallbacks(metric, schema, window, matchers, label_key)
+        if value is not None:
+            return value
+
+        # Infra/process metrics may not carry the same service label as
+        # HTTP metrics in some deployments. If service-scoped query misses,
+        # retry without the service matcher as a best-effort fallback.
+        if metric in (MetricType.CPU_USAGE, MetricType.MEMORY_USAGE) and label_key in matchers:
+            relaxed_matchers = {k: v for k, v in matchers.items() if k != label_key}
+            return await self._query_with_fallbacks(metric, schema, window, relaxed_matchers, label_key)
+
+        return None
+
+    async def _query_with_fallbacks(
+        self,
+        metric: MetricType,
+        schema: LabelSchema,
+        window: str,
+        matchers: dict[str, str],
+        label_hint: str,
+    ) -> Optional[float]:
+        """Try recording rule first, then fallback raw PromQL for the same scope."""
+
         # 1) Primary source: recording rule, scoped to this target.
-        rule_name = await self._rule_resolver.resolve(metric, label_hint=label_key)
+        rule_name = await self._rule_resolver.resolve(metric, label_hint=label_hint)
         if rule_name:
             promql = PromQLBuilder.with_matchers(rule_name, matchers)
             value = await self._run_instant_scalar(promql)
