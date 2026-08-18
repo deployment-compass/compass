@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from compass.ingestion import normalizer
+from compass.src.compass.ingestion import event_normalizer
 from compass.ingestion.adaptors.base import AdaptorError
 from compass.schemas.events import NormalizedEvent
 
@@ -67,7 +67,7 @@ class Collector:
         while True:
             event = await self._queue.get()
             try:
-                await normalizer.process(event)
+                await event_normalizer.process(event)
             except Exception:
                 logger.exception(
                     "worker %d failed processing event dedupe_key=%s",

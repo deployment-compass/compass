@@ -1,5 +1,5 @@
 """
-Example usage of PrometheusAdapter and ContextBuilder in different environments.
+Example usage of PrometheusAdaptor and ContextBuilder in different environments.
 
 Shows how the same code works seamlessly for:
 1. Local Docker Compose with Node Exporter (process metrics)
@@ -10,10 +10,10 @@ The adapter auto-discovers the environment and adapts queries accordingly.
 """
 
 import asyncio
-from compass.ingestion.adaptors.prometheous.prometheous import PrometheusAdapter
+from compass.ingestion.adaptors.prometheous.prom_adaptor import PrometheusAdaptor
 from compass.ingestion.adaptors.loki import LokiAdaptor
-from compass.ingestion.context_builder import ContextBuilder
-
+from compass.src.compass.context.context_builder import ContextBuilder
+from config import settings
 
 # ============================================================================
 # SCENARIO 1: Local Docker Compose with Node Exporter
@@ -33,8 +33,8 @@ async def example_local_node_exporter():
     - K8s labels: None (not available in Docker Compose)
     """
     
-    adapter = PrometheusAdapter(
-        base_url="http://localhost:9090",  # Local Prometheus
+    adapter = PrometheusAdaptor(
+        base_url=settings.prometheus_url,  # Local Prometheus
         schema_cache_ttl_seconds=300,
     )
     
@@ -99,7 +99,7 @@ async def example_kubernetes():
     - K8s labels: automatically discovered and attached to each metric sample
     """
     
-    adapter = PrometheusAdapter(
+    adapter = PrometheusAdaptor(
         base_url="http://prometheus.compass.svc:9090",  # In-cluster Prometheus
         schema_cache_ttl_seconds=300,
     )
@@ -157,7 +157,7 @@ async def example_context_builder_local():
     Same interface works for all environments — no branching needed.
     """
     
-    prometheus = PrometheusAdapter(base_url="http://localhost:9090")
+    prometheus = PrometheusAdaptor(base_url="http://localhost:9090")
     loki = LokiAdaptor(base_url="http://localhost:3100")
     
     builder = ContextBuilder(prometheus, loki)
@@ -193,7 +193,7 @@ async def example_context_builder_k8s():
     The adapter auto-adapts to K8s without any code changes.
     """
     
-    prometheus = PrometheusAdapter(base_url="http://prometheus.compass.svc:9090")
+    prometheus = PrometheusAdaptor(base_url="http://prometheus.compass.svc:9090")
     loki = LokiAdaptor(base_url="http://loki.compass.svc:3100")
     
     builder = ContextBuilder(prometheus, loki)

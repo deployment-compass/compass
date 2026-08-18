@@ -14,7 +14,7 @@ from compass.ingestion.adaptors.github import GitHubActionsAdaptor
 from compass.ingestion.adaptors.argocd import ArgoCDAdaptor
 from compass.ingestion.adaptors.kubernetes_watch import KubernetesWatchAdaptor
 from compass.ingestion.adaptors.base import AdaptorError
-from compass.ingestion.collector import collector
+from compass.src.compass.ingestion.event_collector import collector
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])

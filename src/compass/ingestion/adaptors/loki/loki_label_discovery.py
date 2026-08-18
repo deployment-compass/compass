@@ -15,12 +15,16 @@ import httpx
 from .loki_models import LogLabelSchema
 
 _GROUP_LABEL_CANDIDATES = ["service", "app", "app_kubernetes_io_name", "namespace", "job"]
+_ENVIRONMENT_LABEL_CANDIDATES = ["environment", "env", "deployment_environment"]
+_NAMESPACE_LABEL_CANDIDATES = ["namespace", "kube_namespace"]
+_POD_LABEL_CANDIDATES = ["pod", "pod_name", "kube_pod"]
+_CONTAINER_LABEL_CANDIDATES = ["container", "container_name"]
 
 # The base stream selector every rule in the uploaded ruleset is built on
 # ({job=~".+"}). Kept as a constant default rather than "discovered"
 # because it's a deliberate scoping choice (match all jobs), not a fact
 # about label presence the way the group label is.
-_DEFAULT_STREAM_SELECTOR_BASE = 'job=~".+"'
+_DEFAULT_STREAM_SELECTOR_BASE = ""
 
 
 class LokiLabelDiscovery:
@@ -45,6 +49,10 @@ class LokiLabelDiscovery:
         schema = LogLabelSchema(
             group_label=group_label or "job",
             stream_selector_base=_DEFAULT_STREAM_SELECTOR_BASE,
+            environment_label=await self._first_populated_label(_ENVIRONMENT_LABEL_CANDIDATES),
+            namespace_label=await self._first_populated_label(_NAMESPACE_LABEL_CANDIDATES),
+            pod_label=await self._first_populated_label(_POD_LABEL_CANDIDATES),
+            container_label=await self._first_populated_label(_CONTAINER_LABEL_CANDIDATES),
         )
         self._cached = schema
         self._cached_at = time.monotonic()

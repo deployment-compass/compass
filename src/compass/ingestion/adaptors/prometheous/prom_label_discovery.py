@@ -46,10 +46,12 @@ _K8S_CONTAINER_LABEL_CANDIDATES = ["container", "container_name"]
 _CPU_METRIC_CANDIDATES = [
     ("container_cpu_usage_seconds_total", ArchitectureMode.MICROSERVICE),
     ("process_cpu_seconds_total", ArchitectureMode.MONOLITH),
+    ("node_cpu_seconds_total", ArchitectureMode.MONOLITH),
 ]
 _MEMORY_METRIC_CANDIDATES = [
     ("container_memory_working_set_bytes", ArchitectureMode.MICROSERVICE),
     ("process_resident_memory_bytes", ArchitectureMode.MONOLITH),
+    ("node_memory_MemAvailable_bytes", ArchitectureMode.MONOLITH),
 ]
 
 

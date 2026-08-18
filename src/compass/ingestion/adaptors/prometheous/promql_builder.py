@@ -100,6 +100,9 @@ class PromQLBuilder:
         # Some cAdvisor deployments do not expose a `container` label;
         # filtering on `container!=""` would drop every series.
         selector = PromQLBuilder._selector(schema.cpu_metric, "", matchers)
+        if schema.cpu_metric == "node_cpu_seconds_total":
+            idle_selector = PromQLBuilder._selector(schema.cpu_metric, 'mode="idle"', matchers)
+            return f"(1 - avg(rate({idle_selector}[{window}])) by ({label}))"
         return f"sum(rate({selector}[{window}])) by ({label})"
 
     @staticmethod
@@ -107,6 +110,9 @@ class PromQLBuilder:
         label = schema.process_group_label
         # Same rationale as CPU: do not assume `container` label exists.
         selector = PromQLBuilder._selector(schema.memory_metric, "", matchers)
+        if schema.memory_metric == "node_memory_MemAvailable_bytes":
+            total_selector = PromQLBuilder._selector("node_memory_MemTotal_bytes", "", matchers)
+            return f"sum({total_selector} - {selector}) by ({label})"
         return f"sum({selector}) by ({label})"
 
     # -- selector assembly ----------------------------------------------

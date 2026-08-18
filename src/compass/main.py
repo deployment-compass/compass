@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI,Request,Depends,Response, status
 from typing import Optional
 from compass.api import webhooks 
-from compass.ingestion.collector import collector
+from compass.src.compass.ingestion.event_collector import collector
 from compass.ingestion.adaptors.prometheous.prom_adaptor import PrometheusAdapter
 from compass.ingestion.adaptors.loki.loki_adaptor import LokiAdapter
 from compass.config import settings
@@ -153,6 +153,9 @@ async def get_schema(adapter: PrometheusAdapter = Depends(get_prometheus_adapter
         "cpu_metric": schema.cpu_metric,
         "memory_metric": schema.memory_metric,
         "environment_label": schema.environment_label,
+        "namespace_label": schema.namespace_label,
+        "pod_label": schema.pod_label,
+        "container_label": schema.container_label,
     }
     
 # Start the app
