@@ -205,13 +205,13 @@ class PrometheusAdapter:
         rule_name = await self._rule_resolver.resolve(metric, label_hint=label_key)
         if rule_name:
             samples = await self._run_instant_vector(
-                rule_name, metric, DataSource.RECORDING_RULE, label_key
+                rule_name, metric, DataSource.RECORDING_RULE, label_key, schema
             )
             if samples:
                 return samples
 
         promql = PromQLBuilder.build(metric, schema, window=window)
-        return await self._run_instant_vector(promql, metric, DataSource.DIRECT_QUERY, label_key)
+        return await self._run_instant_vector(promql, metric, DataSource.DIRECT_QUERY, label_key, schema)
 
     @staticmethod
     def _label_for(metric: MetricType, schema: LabelSchema) -> str:
@@ -220,7 +220,7 @@ class PrometheusAdapter:
         return schema.http_group_label
 
     async def _run_instant_vector(
-        self, promql: str, metric: MetricType, source: DataSource, label_key: str
+        self, promql: str, metric: MetricType, source: DataSource, label_key: str, schema: LabelSchema
     ) -> list[MetricSample]:
         resp = await self._client.get(
             f"{self._base_url}/api/v1/query", params={"query": promql}
@@ -236,6 +236,12 @@ class PrometheusAdapter:
                 value = float(entry["value"][1])
             except (KeyError, IndexError, ValueError, TypeError):
                 value = None
+            
+            # Extract optional K8s labels if available in schema
+            namespace = labels.get(schema.namespace_label) if schema.namespace_label else None
+            pod = labels.get(schema.pod_label) if schema.pod_label else None
+            container = labels.get(schema.container_label) if schema.container_label else None
+            
             samples.append(
                 MetricSample(
                     metric=metric,
@@ -244,6 +250,9 @@ class PrometheusAdapter:
                     source=source,
                     promql=promql,
                     raw_label=label_key,
+                    namespace=namespace,
+                    pod=pod,
+                    container=container,
                 )
             )
         return samples

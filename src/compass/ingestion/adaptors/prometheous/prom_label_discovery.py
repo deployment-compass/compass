@@ -9,6 +9,8 @@ module *probes* the live Prometheus instance:
   - Which of the container- vs process-level CPU/memory metric families
     actually has data? That tells us microservice vs monolith more
     reliably than guessing from label names alone.
+  - (K8s-specific) Which Kubernetes labels are available?
+    (namespace, pod, container) — optional enrichment, only if present.
 
 Results are cached with a TTL, since this costs several HTTP round trips
 and label sets rarely change during a running collection loop.
@@ -34,6 +36,11 @@ _HTTP_LABEL_CANDIDATES = [
 ]
 _PROCESS_LABEL_CANDIDATES = ["service", "job", "instance"]
 _ENVIRONMENT_LABEL_CANDIDATES = ["environment", "env", "deployment_environment"]
+
+# K8s-specific labels (optional, only discovered if present)
+_K8S_NAMESPACE_LABEL_CANDIDATES = ["namespace", "kube_namespace"]
+_K8S_POD_LABEL_CANDIDATES = ["pod", "pod_name", "kube_pod"]
+_K8S_CONTAINER_LABEL_CANDIDATES = ["container", "container_name"]
 
 # (metric_name, architecture_it_implies), priority-ordered.
 _CPU_METRIC_CANDIDATES = [
@@ -77,6 +84,11 @@ class LabelDiscovery:
         # Optional: only some deployments carry an environment/env label at
         # all. None here just means query() won't add that matcher.
         environment_label = await self._first_populated_label(_ENVIRONMENT_LABEL_CANDIDATES)
+        
+        # K8s-specific labels (optional, only if present)
+        namespace_label = await self._first_populated_label(_K8S_NAMESPACE_LABEL_CANDIDATES)
+        pod_label = await self._first_populated_label(_K8S_POD_LABEL_CANDIDATES)
+        container_label = await self._first_populated_label(_K8S_CONTAINER_LABEL_CANDIDATES)
 
         schema = LabelSchema(
             architecture=architecture,
@@ -85,6 +97,9 @@ class LabelDiscovery:
             cpu_metric=cpu_metric or "process_cpu_seconds_total",
             memory_metric=mem_metric or "process_resident_memory_bytes",
             environment_label=environment_label,
+            namespace_label=namespace_label,
+            pod_label=pod_label,
+            container_label=container_label,
         )
         self._cached = schema
         self._cached_at = time.monotonic()
