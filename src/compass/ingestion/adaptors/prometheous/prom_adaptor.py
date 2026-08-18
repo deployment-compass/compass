@@ -95,8 +95,16 @@ class PrometheusAdapter:
 
     @staticmethod
     def _label_for(metric: MetricType, schema: LabelSchema) -> str:
-        return schema.process_group_label if metric in (MetricType.CPU_USAGE, MetricType.MEMORY_USAGE) else schema.http_group_label
-
+        return (
+            schema.process_group_label
+            if metric in (
+                MetricType.CPU_USAGE,
+                MetricType.MEMORY_USAGE,
+                MetricType.MEMORY_USAGE_PERCENT,
+                MetricType.DISK_USAGE_PERCENT,
+            )
+            else schema.http_group_label
+        )
     async def _run_instant_scalar(self, promql: str) -> Optional[float]:
         response = await self._client.get(f"{self._base_url}/api/v1/query", params={"query": promql})
         response.raise_for_status()

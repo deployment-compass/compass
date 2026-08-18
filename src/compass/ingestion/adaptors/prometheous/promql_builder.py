@@ -1,11 +1,6 @@
 """
 Pure PromQL construction.
-Given a discovered LabelSchema and a MetricType, produces the raw PromQL string
-to run against /api/v1/query (or /api/v1/query_range).
-
-`target_matchers` lets a caller scope the query down to one target
-before it ever hits the wire — e.g. {"service": "checkout-api",
-"environment": "prod"} 
+...
 """
 from __future__ import annotations
 
@@ -35,6 +30,10 @@ class PromQLBuilder:
             return PromQLBuilder._cpu_usage(schema, window, target_matchers)
         if metric is MetricType.MEMORY_USAGE:
             return PromQLBuilder._memory_usage(schema, window, target_matchers)
+        if metric is MetricType.MEMORY_USAGE_PERCENT:
+            return PromQLBuilder._memory_usage_percent(schema, target_matchers)
+        if metric is MetricType.DISK_USAGE_PERCENT:
+            return PromQLBuilder._disk_usage_percent(schema, target_matchers)
         raise ValueError(f"Unsupported metric type: {metric!r}")
 
     @staticmethod
@@ -44,24 +43,10 @@ class PromQLBuilder:
         window: str = "5m",
         target_matchers: Matchers = None,
     ) -> str:
-        """
-        Same PromQL as `build`, intended for /api/v1/query_range callers
-        (e.g. trend/slope inputs like a memory_trend recording rule). The
-        instant-vs-range distinction lives in the query params
-        (start/end/step), not the expression, so this just re-exposes
-        `build` under an explicit name for range callers.
-        """
         return PromQLBuilder.build(metric, schema, window=window, target_matchers=target_matchers)
 
     @staticmethod
     def with_matchers(metric_name: str, target_matchers: Matchers = None) -> str:
-        """
-        Scope an arbitrary metric name (including a resolved recording
-        rule name) down to a target — used by the adapter's per-service
-        `query()` path to filter e.g.
-        `test_compass:service:p95_latency_seconds{service="checkout-api"}`
-        instead of pulling every service's value.
-        """
         return PromQLBuilder._selector(metric_name, "", target_matchers)
 
     # -- individual builders -------------------------------------------------
@@ -69,13 +54,8 @@ class PromQLBuilder:
     @staticmethod
     def _p95_latency(schema: LabelSchema, window: str, matchers: Matchers) -> str:
         label = schema.http_group_label
-        selector = PromQLBuilder._selector(
-            "http_request_duration_seconds_bucket", "", matchers
-        )
-        return (
-            f"histogram_quantile(0.95, "
-            f"sum(rate({selector}[{window}])) by ({label}, le))"
-        )
+        selector = PromQLBuilder._selector("http_request_duration_seconds_bucket", "", matchers)
+        return f"histogram_quantile(0.95, sum(rate({selector}[{window}])) by ({label}, le))"
 
     @staticmethod
     def _error_rate(schema: LabelSchema, window: str, matchers: Matchers) -> str:
@@ -97,8 +77,6 @@ class PromQLBuilder:
     @staticmethod
     def _cpu_usage(schema: LabelSchema, window: str, matchers: Matchers) -> str:
         label = schema.process_group_label
-        # Some cAdvisor deployments do not expose a `container` label;
-        # filtering on `container!=""` would drop every series.
         selector = PromQLBuilder._selector(schema.cpu_metric, "", matchers)
         if schema.cpu_metric == "node_cpu_seconds_total":
             idle_selector = PromQLBuilder._selector(schema.cpu_metric, 'mode="idle"', matchers)
@@ -108,18 +86,71 @@ class PromQLBuilder:
     @staticmethod
     def _memory_usage(schema: LabelSchema, window: str, matchers: Matchers) -> str:  # noqa: ARG004
         label = schema.process_group_label
-        # Same rationale as CPU: do not assume `container` label exists.
         selector = PromQLBuilder._selector(schema.memory_metric, "", matchers)
         if schema.memory_metric == "node_memory_MemAvailable_bytes":
             total_selector = PromQLBuilder._selector("node_memory_MemTotal_bytes", "", matchers)
             return f"sum({total_selector} - {selector}) by ({label})"
         return f"sum({selector}) by ({label})"
 
+    @staticmethod
+    def _memory_usage_percent(schema: LabelSchema, matchers: Matchers) -> str:
+        """0-100 memory utilization. Formula depends on which memory_metric
+        discovery found, mirroring _memory_usage's own family switch."""
+        label = schema.process_group_label
+
+        if schema.memory_metric == "container_memory_working_set_bytes":
+            if not schema.memory_limit_metric:
+                raise ValueError("memory_usage_percent unavailable: no container memory limit metric discovered")
+            used = PromQLBuilder._selector(schema.memory_metric, "", matchers)
+            # Unbounded containers report a huge sentinel limit rather than 0,
+            # so this ratio degrades gracefully (reads ~0%) instead of dividing
+            # by zero; no extra filtering needed.
+            limit = PromQLBuilder._selector(schema.memory_limit_metric, "", matchers)
+            return f"clamp(sum({used}) by ({label}) / sum({limit}) by ({label}) * 100, 0, 100)"
+
+        if schema.memory_metric == "node_memory_MemAvailable_bytes":
+            avail = PromQLBuilder._selector(schema.memory_metric, "", matchers)
+            total = PromQLBuilder._selector("node_memory_MemTotal_bytes", "", matchers)
+            return f"clamp((1 - sum({avail}) by ({label}) / sum({total}) by ({label})) * 100, 0, 100)"
+
+        # process_resident_memory_bytes has no natural % denominator at that
+        # granularity; fall back to node-level totals if they were discovered.
+        if not schema.memory_total_metric:
+            raise ValueError("memory_usage_percent unavailable: no node memory total metric discovered")
+        used = PromQLBuilder._selector(schema.memory_metric, "", matchers)
+        total = PromQLBuilder._selector(schema.memory_total_metric, "", matchers)
+        return f"clamp(sum({used}) by ({label}) / sum({total}) by ({label}) * 100, 0, 100)"
+
+    @staticmethod
+    def _disk_usage_percent(schema: LabelSchema, matchers: Matchers) -> str:
+        """0-100 filesystem utilization. Container mode uses usage/limit
+        directly; node mode uses 1 - avail/size, scoped to a mountpoint so a
+        multi-volume host doesn't get its filesystems summed together."""
+        label = schema.process_group_label
+
+        if not schema.disk_metric or not schema.disk_pair_metric:
+            raise ValueError("disk_usage_percent unavailable: no filesystem metric pair discovered")
+
+        if schema.disk_metric == "container_fs_usage_bytes":
+            used = PromQLBuilder._selector(schema.disk_metric, "", matchers)
+            limit = PromQLBuilder._selector(schema.disk_pair_metric, "", matchers)
+            return f"clamp(sum({used}) by ({label}) / sum({limit}) by ({label}) * 100, 0, 100)"
+
+        # node_filesystem_avail_bytes / node_filesystem_size_bytes.
+        # Default to root filesystem; caller can override via target_matchers,
+        # e.g. {"mountpoint": "/data"}.
+        mountpoint_matchers = dict(matchers or {})
+        if schema.disk_mountpoint_label and schema.disk_mountpoint_label not in mountpoint_matchers:
+            mountpoint_matchers[schema.disk_mountpoint_label] = "/"
+
+        avail = PromQLBuilder._selector(schema.disk_metric, "", mountpoint_matchers)
+        size = PromQLBuilder._selector(schema.disk_pair_metric, "", mountpoint_matchers)
+        return f"clamp((1 - sum({avail}) by ({label}) / sum({size}) by ({label})) * 100, 0, 100)"
+
     # -- selector assembly ----------------------------------------------
 
     @staticmethod
     def _selector(metric_name: str, base_matchers: str, extra: Matchers) -> str:
-        """Build `metric_name{base_matchers, extra...}`, omitting empty braces."""
         parts = [p for p in (base_matchers,) if p]
         if extra:
             parts.append(", ".join(f'{k}="{v}"' for k, v in extra.items()))

@@ -152,6 +152,7 @@ async def get_schema(adapter: PrometheusAdapter = Depends(get_prometheus_adapter
         "process_group_label": schema.process_group_label,
         "cpu_metric": schema.cpu_metric,
         "memory_metric": schema.memory_metric,
+        "disk_metric": schema.disk_metric,
         "environment_label": schema.environment_label,
         "namespace_label": schema.namespace_label,
         "pod_label": schema.pod_label,
