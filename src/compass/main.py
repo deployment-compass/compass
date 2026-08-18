@@ -77,7 +77,7 @@ def get_prometheus_adapter(request: Request) -> PrometheusAdapter:
   
 def get_loki_adapter(request: Request) -> LokiAdapter:
     """FastAPI dependency — inject with Depends(get_loki_adapter)."""
-    adapter: Optional[LokiAdapter] = getattr(request.app.state, _STATE_KEY, None)
+    adapter: Optional[LokiAdapter] = getattr(request.app.state, _LOKI_KEY_, None)
     if adapter is None:
         raise RuntimeError(
             "LokiAdapter not attached to app.state — wire up loki_lifespan "
