@@ -11,6 +11,7 @@ dependencies = [
     "aio-pika>=10.0.1",
     "alembic>=1.19.0",
     "fastapi[standard]>=0.141.1",
+    "httpx>=0.28.1",
     "psycopg>=3.3.4",
     "pydantic-settings>=2.14.2",
     "redis>=8.1.0",

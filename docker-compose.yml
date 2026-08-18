@@ -4,14 +4,16 @@ services:
     env_file:
       - .env
     environment:
-      REDIS_URL: redis://redis:6379/0
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      COMPASS_PROMETHEUS_URL: http://prometheus:9090
+      COMPASS_LOKI_URL: http://loki:3100
+      COMPASS_REDIS_URL: redis://redis:6379/0
+      COMPASS_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     ports:
       - "8000:8000"
     depends_on:
       - redis
       - rabbitmq
-
+    
   redis:
     image: dhi.io/redis:8-debian-dev
     ports:
@@ -22,3 +24,18 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
+
+  prometheus:
+    image: dhi.io/prometheus:3.13
+    user: "0:0"
+    container_name: prometheus
+    ports:
+      - 9090:9090
+    restart: unless-stopped
+    volumes:
+      - prom_data:/prometheus
+
+volumes:
+  prom_data:
+    name: test-compass_prom_data
+    external: true
