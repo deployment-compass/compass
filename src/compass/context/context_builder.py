@@ -5,7 +5,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Optional
 
-from compass.ingestion.adaptors.loki.loki_adaptor import LokiAdapter
+from compass.ingestion.adaptors.loki.loki_adaptor import LokiAdaptor
 from compass.ingestion.adaptors.prometheous.prom_adaptor import PrometheusAdapter
 from compass.ingestion.adaptors.prometheous.prom_models import ArchitectureMode, MetricType, MetricsContext
 
@@ -14,7 +14,7 @@ from compass.ingestion.adaptors.prometheous.prom_models import ArchitectureMode,
 class BuilderResult:
     metrics: MetricsContext
     log_signals: dict[str, Optional[float]] = field(default_factory=dict)
-    # Retained for callers using the former LokiAdaptor response. New LokiAdapter
+    # Retained for callers using the former LokiAdaptor response. New LokiAdaptor
     # produces signals rather than shipping unbounded raw logs into model context.
     log_lines: list[str] = field(default_factory=list)
     had_metric_errors: bool = False
@@ -39,7 +39,7 @@ class BuilderResult:
 
 
 class ContextBuilder:
-    def __init__(self, prometheus_adapter: PrometheusAdapter, loki_adapter: Optional[LokiAdapter] = None):
+    def __init__(self, prometheus_adapter: PrometheusAdapter, loki_adapter: Optional[LokiAdaptor] = None):
         self._prometheus = prometheus_adapter
         self._loki = loki_adapter
 

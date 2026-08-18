@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from compass.src.compass.ingestion import event_normalizer
+from compass.ingestion import event_normalizer
 from compass.ingestion.adaptors.base import AdaptorError
 from compass.schemas.events import NormalizedEvent
 

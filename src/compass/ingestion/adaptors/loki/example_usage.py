@@ -11,14 +11,14 @@ from __future__ import annotations
 import asyncio
 import json
 
-from .loki_adaptor import LokiAdapter
+from .loki_adaptor import LokiAdaptor
 from .loki_models import LogSignalType
 
 LOKI_URL = "http://localhost:3100"
 
 
 async def context_builder_pattern() -> None:
-    adapter = LokiAdapter(LOKI_URL)
+    adapter = LokiAdaptor(LOKI_URL)
 
     context = await adapter.query(
         service="checkout-api", environment="prod", window_seconds=300
@@ -30,7 +30,7 @@ async def context_builder_pattern() -> None:
 
 
 async def fleet_wide_pattern() -> None:
-    adapter = LokiAdapter(LOKI_URL)
+    adapter = LokiAdaptor(LOKI_URL)
     schema = await adapter.get_schema()
     print(f"group_label={schema.group_label} base_selector={schema.stream_selector_base}")
 

@@ -12,7 +12,7 @@ The adapter auto-discovers the environment and adapts queries accordingly.
 import asyncio
 from compass.ingestion.adaptors.prometheous.prom_adaptor import PrometheusAdaptor
 from compass.ingestion.adaptors.loki import LokiAdaptor
-from compass.src.compass.context.context_builder import ContextBuilder
+from compass.context.context_builder import ContextBuilder
 from config import settings
 
 # ============================================================================

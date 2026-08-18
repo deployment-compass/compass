@@ -5,9 +5,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI,Request,Depends,Response, status
 from typing import Optional
 from compass.api import webhooks 
-from compass.src.compass.ingestion.event_collector import collector
+from compass.ingestion.event_collector import collector
 from compass.ingestion.adaptors.prometheous.prom_adaptor import PrometheusAdapter
-from compass.ingestion.adaptors.loki.loki_adaptor import LokiAdapter
+from compass.ingestion.adaptors.loki.loki_adaptor import LokiAdaptor
 from compass.config import settings
 import asyncio
 
@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI):
     )
     setattr(app.state, _PROM_KEY_, prom_adapter)
     
-    loki_adaptor = LokiAdapter(
+    loki_adaptor = LokiAdaptor(
         base_url=settings.loki_url,
         timeout_seconds=settings.loki_timeout_seconds,
         schema_cache_ttl_seconds=settings.loki_cache_ttl_seconds,
@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI):
     setattr(app.state, _PROM_KEY_, None) 
     
     # clean up loki adaptor
-    loki_adaptor: Optional[LokiAdapter] = getattr(app.state, _LOKI_KEY_, None)
+    loki_adaptor: Optional[LokiAdaptor] = getattr(app.state, _LOKI_KEY_, None)
         
     if loki_adaptor is not None:
         await loki_adaptor.aclose()
@@ -76,12 +76,12 @@ def get_prometheus_adapter(request: Request) -> PrometheusAdapter:
     return adapter
 
   
-def get_loki_adapter(request: Request) -> LokiAdapter:
+def get_loki_adapter(request: Request) -> LokiAdaptor:
     """FastAPI dependency — inject with Depends(get_loki_adapter)."""
-    adapter: Optional[LokiAdapter] = getattr(request.app.state, _LOKI_KEY_, None)
+    adapter: Optional[LokiAdaptor] = getattr(request.app.state, _LOKI_KEY_, None)
     if adapter is None:
         raise RuntimeError(
-            "LokiAdapter not attached to app.state — wire up loki_lifespan "
+            "LokiAdaptor not attached to app.state — wire up loki_lifespan "
             "(or call attach_loki_adapter in your own lifespan handler) "
             "before serving requests."
         )
@@ -104,7 +104,7 @@ def liveness():
 async def readiness(
     response: Response,
     prom: PrometheusAdapter = Depends(get_prometheus_adapter),
-    loki: LokiAdapter = Depends(get_loki_adapter),
+    loki: LokiAdaptor = Depends(get_loki_adapter),
 ):
     """Can we actually serve requests? Pings each dependency."""
     checks = {"prometheus": prom.ping(), "loki": loki.ping()}
@@ -128,7 +128,7 @@ async def get_full_context(
     environment: str = "prod",
     window_seconds: int = 300,
     prom: PrometheusAdapter = Depends(get_prometheus_adapter),
-    loki: LokiAdapter = Depends(get_loki_adapter),
+    loki: LokiAdaptor = Depends(get_loki_adapter),
 ):
     """
     The actual Context Builder shape: merge metric-derived and

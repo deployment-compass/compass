@@ -250,7 +250,7 @@ Design keeps these separate from generic metrics:
 
 - PrometheusAdapter: Generic metrics (CPU, memory, latency, errors)
 - KubernetesAdapter: K8s-specific events (pod status, rollout progress)
-- LokiAdapter: Logs
+- LokiAdaptor: Logs
 
 Layer 3 receives all three and correlates them for root-cause analysis.
 A high memory usage (Prometheus) + OOMKilled event (K8s) → likely memory leak.
