@@ -4,7 +4,6 @@ Strongly typed interfaces shared across the promtheous adapter package.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 

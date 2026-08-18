@@ -71,8 +71,8 @@ class LabelDiscovery:
 
         architecture = cpu_arch or mem_arch or ArchitectureMode.UNKNOWN
         process_label = await self._first_populated_label(_PROCESS_LABEL_CANDIDATES)
-        
-        
+
+        environment_label = await self._first_populated_label(_ENVIRONMENT_LABEL_CANDIDATES)
 
         schema = LabelSchema(
             architecture=architecture,
@@ -92,7 +92,8 @@ class LabelDiscovery:
             resp.raise_for_status()
             data = resp.json().get("data", [])
             return len(data) > 0
-        except httpx.HTTPError:
+        except httpx.HTTPError as e:
+            print(f"[LabelDiscovery Error] {label}: {e}")
             return False
 
     async def _first_populated_label(self, candidates: list[str]) -> Optional[str]:

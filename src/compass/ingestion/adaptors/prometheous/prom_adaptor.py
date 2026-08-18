@@ -43,7 +43,6 @@ from .prom_recording_rule_resolver import RecordingRuleResolver
 
 ALL_METRICS: tuple[MetricType, ...] = tuple(MetricType)
 
-_TARGET_LABEL_FALLBACKS = ("service", "job", "instance", "handler", "route", "endpoint")
 
 
 class PrometheusAdapter:
