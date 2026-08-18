@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI,Request,Depends
 from typing import Optional
 from compass.api import webhooks
+from compass.api import heath
 from compass.ingestion.collector import collector
 from compass.ingestion.adaptors.prometheous.prom_adaptor import PrometheusAdapter
 from compass.ingestion.adaptors.loki.loki_adaptor import LokiAdapter
@@ -91,13 +92,9 @@ def get_loki_adapter(request: Request) -> LokiAdapter:
 # routers 
   
 app.include_router(webhooks.router)
-
+app.include_router(health.router)
 
 # root endPoints
-@app.get("/health")
-def health_check():
-    return {"status": "ok"}
-
 
 @app.get("/context/{service}")
 async def get_full_context(

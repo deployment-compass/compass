@@ -3,12 +3,17 @@ services:
     build: .
     env_file:
       - .env
+    environment:
+      COMPASS_PROMETHEUS_URL: http://prometheus:9090
+      COMPASS_LOKI_URL: http://loki:3100
+      COMPASS_REDIS_URL: redis://redis:6379/0
+      COMPASS_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     ports:
       - "8000:8000"
     depends_on:
       - redis
       - rabbitmq
-
+    
   redis:
     image: dhi.io/redis:8-debian-dev
     ports:
