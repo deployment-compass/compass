@@ -140,3 +140,11 @@ class LokiAdapter:
     async def get_schema(self, force_refresh: bool = False) -> LogLabelSchema:
         self._ensure_client()
         return await self._discovery.discover(force=force_refresh)
+
+
+    async def ping(self) -> bool:
+        """Lightweight liveness check against Loki's own ready endpoint."""
+        self._ensure_client()
+        resp = await self._client.get(f"{self._base_url}/ready")
+        resp.raise_for_status()
+        return True

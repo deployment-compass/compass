@@ -175,3 +175,10 @@ class PrometheusAdapter:
         if metric in (MetricType.CPU_USAGE, MetricType.MEMORY_USAGE):
             return schema.process_group_label
         return schema.http_group_label
+
+    async def ping(self) -> bool:
+        """Lightweight liveness check against Prometheus's own health endpoint."""
+        self._ensure_client()
+        resp = await self._client.get(f"{self._base_url}/-/healthy")
+        resp.raise_for_status()
+        return True
