@@ -14,8 +14,15 @@ from .promql_builder import PromQLBuilder
 # Tuple of all supported metric types to query or collect by default
 ALL_METRICS: tuple[MetricType, ...] = tuple(MetricType)
 
-# Prioritized list of Prometheus label names used to resolve the target name if the primary label is missing
-_TARGET_LABEL_FALLBACKS = ("service", "app", "job", "instance", "handler", "route", "endpoint")
+# Prioritized list of Prometheus label names used to resolve the target name if the primary label is missing.
+# "container" / "pod" are included because the CPU_USAGE container-cpu PromQL
+# (see PromQLBuilder._cpu_usage) groups by the container label rather than
+# the service/job label, so series returned for that metric may only carry
+# container/pod — without these, _extract_target would fall through to
+# "unknown" for otherwise perfectly valid container-scoped CPU samples.
+_TARGET_LABEL_FALLBACKS = (
+    "service", "app", "job", "instance", "handler", "route", "endpoint", "container", "pod",
+)
 
 # Infrastructure-level metrics that often lack application/service labels and need query relaxation
 _INFRASTRUCTURE_METRICS = frozenset(
@@ -44,7 +51,7 @@ class PrometheusAdapter:
         self._timeout = timeout_seconds
         self._schema_ttl = schema_cache_ttl_seconds
         self._overrides = recording_rule_overrides
-        
+
         # Lazy-initialized HTTP client and auxiliary helpers
         self._client: Optional[httpx.AsyncClient] = None
         self._discovery: Optional[LabelDiscovery] = None
@@ -114,17 +121,26 @@ class PrometheusAdapter:
         """Query a single metric for a service with automatic relaxation for infrastructure metrics."""
         label_key = self._label_for(metric, schema)
         matchers = self._target_matchers(schema, label_key, service, environment)
-        
-        # Primary query attempt using target service matchers
-        value = await self._query_with_fallbacks(metric, schema, window, matchers, label_key)
+
+        # Primary query attempt using target service matchers. Pass the
+        # actual target *value* (service) as the recording-rule hint, not
+        # the label *name* (label_key) — RecordingRuleResolver.resolve()
+        # substring-matches the hint against rule names (e.g. "checkout"
+        # inside "checkout_cpu_usage_ratio"), so passing "service"/"job"
+        # here never matches anything and silently defeats the disambiguation.
+        value = await self._query_with_fallbacks(metric, schema, window, matchers, service)
         if value is not None or metric not in _INFRASTRUCTURE_METRICS:
             return value
 
         # Node-exporter and cAdvisor infrastructure metrics frequently do not
-        # carry the application's service label. Retry without that matcher so
-        # the response can include the node/container hosting the service.
-        relaxed = {key: v for key, v in matchers.items() if key != label_key}
-        return await self._query_with_fallbacks(metric, schema, window, relaxed, label_key)
+        # carry the application's service label — and, when an
+        # environment_label was discovered, they don't carry that either
+        # (environment is an application-level label, not something
+        # node_exporter/cAdvisor attach). Dropping only label_key and
+        # leaving environment_label in `matchers` reproduces the same
+        # empty-match problem via a different label, so the relaxed retry
+        # drops every application-level matcher, not just the target one.
+        return await self._query_with_fallbacks(metric, schema, window, {}, service)
 
     async def _extract_k8s_labels(
         self, schema: LabelSchema, window: str, service: str, environment: str
@@ -174,19 +190,20 @@ class PrometheusAdapter:
             return empty
         except Exception:  # noqa: BLE001
             return empty
-    
+
     async def list_services(self, force_refresh: bool = False) -> set[str]:
         """Discover distinct service/app names via the schema's HTTP group label."""
         self._ensure_client()
-        
+
         schema = await self.get_schema(force_refresh=force_refresh)
-        
+
         response = await self._client.get(
             f"{self._base_url}/api/v1/label/{schema.http_group_label}/values"
         )
-        
+
         response.raise_for_status()
         return set(response.json().get("data", []))
+
     async def _query_with_fallbacks(
         self, metric: MetricType, schema: LabelSchema, window: str, matchers: dict[str, str], label_hint: str
     ) -> Optional[float]:
@@ -196,7 +213,7 @@ class PrometheusAdapter:
             value = await self._run_instant_scalar(PromQLBuilder.with_matchers(rule_name, matchers))
             if value is not None:
                 return value
-        
+
         # Fall back to dynamically generating and executing standard PromQL query
         return await self._run_instant_scalar(PromQLBuilder.build(metric, schema, window, matchers))
 
@@ -227,7 +244,7 @@ class PrometheusAdapter:
         response = await self._client.get(f"{self._base_url}/api/v1/query", params={"query": promql})
         response.raise_for_status()
         result = response.json().get("data", {}).get("result", [])
-        
+
         # Safely extract the float value from the first result series
         try:
             return float(result[0]["value"][1])
@@ -237,30 +254,32 @@ class PrometheusAdapter:
     async def collect(self, metrics: tuple[MetricType, ...] = ALL_METRICS, window: str = "5m") -> CollectionResult:
         """Fleet-wide normalized samples, retaining optional K8s labels when present."""
         schema = await self.get_schema()
-        
+
         # Execute vector queries across all targets concurrently
         results = await asyncio.gather(*(self._collect_one(metric, schema, window) for metric in metrics), return_exceptions=True)
-        
+
         samples, errors = [], []
         for metric, result in zip(metrics, results):
             if isinstance(result, Exception):
                 errors.append(f"{metric.value}: {result!r}")
             else:
                 samples.extend(result)
-                
+
         return CollectionResult(schema.architecture, samples, errors)
 
     async def _collect_one(self, metric: MetricType, schema: LabelSchema, window: str) -> list[MetricSample]:
         """Collect vector samples across the fleet for a single metric using recording rules or standard PromQL."""
         label_key = self._label_for(metric, schema)
+        # No specific target here (fleet-wide collection), so the label
+        # *name* is the best available hint for disambiguating rules.
         rule_name = await self._rule_resolver.resolve(metric, label_hint=label_key)
-        
+
         # Try fetching from a pre-computed recording rule first
         if rule_name:
             samples = await self._run_instant_vector(rule_name, metric, DataSource.RECORDING_RULE, label_key, schema)
             if samples:
                 return samples
-                
+
         # Fall back to raw PromQL vector calculation
         promql = PromQLBuilder.build(metric, schema, window)
         return await self._run_instant_vector(promql, metric, DataSource.DIRECT_QUERY, label_key, schema)
@@ -271,7 +290,7 @@ class PrometheusAdapter:
         """Execute instant query expecting a metric vector and parse into standard MetricSample models."""
         response = await self._client.get(f"{self._base_url}/api/v1/query", params={"query": promql})
         response.raise_for_status()
-        
+
         samples = []
         for entry in response.json().get("data", {}).get("result", []):
             labels = entry.get("metric", {})
@@ -279,7 +298,7 @@ class PrometheusAdapter:
                 value = float(entry["value"][1])
             except (KeyError, IndexError, TypeError, ValueError):
                 value = None
-                
+
             # Construct sample instance enriched with target and optional Kubernetes metadata
             samples.append(
                 MetricSample(

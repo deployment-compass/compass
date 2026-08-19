@@ -168,34 +168,56 @@ class PromQLBuilder:
 
         For node/process-level metrics we use the irate of the raw
         counter, which is already normalised per-core by the kernel.
+
+        IMPORTANT: `container_spec_cpu_quota` / `container_spec_cpu_period`
+        are cAdvisor cgroup-*spec* metrics. They carry container/pod/
+        namespace labels but NOT application-level labels such as
+        `service` or `environment` (those are typically attached to the
+        usage/request metrics via relabeling, not to the raw cgroup spec
+        series). Scoping the quota/period selectors with the caller's
+        `matchers` (which come from `service`/`environment`) therefore
+        matches zero series, the division's RHS is empty, and the whole
+        expression silently returns no data. We deliberately leave the
+        quota/period selectors unfiltered and instead group everything
+        by the container label, which all three metrics share — PromQL's
+        `/` then does an inner join on that label, keeping only the
+        containers actually covered by the (filtered) usage series.
         """
         label = schema.process_group_label
         cpu_metric = schema.cpu_metric
 
         if "container_cpu" in cpu_metric:
             # Kubernetes / cgroups path.
-            # We need the container name label to correlate usage with limits.
+            # Group on the container label — the one label all three
+            # metrics (usage, quota, period) reliably share. Grouping on
+            # `label` (service/job) here would leave the RHS ungrouped
+            # from an application-labels standpoint, since quota/period
+            # never carry that label.
             container_label = schema.container_label or "container"
-            # Selector for the usage metric, scoped by matchers.
+
+            # Selector for the usage metric, scoped by the caller's
+            # matchers (service/environment) — this is what actually
+            # narrows the result down to the target.
             usage_selector = PromQLBuilder._selector(cpu_metric, "", matchers)
-            # Selector for the quota metric (how many cores the container is allowed).
-            quota_selector = PromQLBuilder._selector(
-                "container_spec_cpu_quota", "", matchers
-            )
-            # Selector for the period metric (time slice length).
-            period_selector = PromQLBuilder._selector(
-                "container_spec_cpu_period", "", matchers
-            )
+
+            # Selectors for quota/period are intentionally left
+            # unscoped by `matchers` — see docstring above. Do NOT pass
+            # `matchers` here; doing so reproduces the "CPU always null"
+            # bug for any schema with an environment_label or where the
+            # process_group_label isn't itself carried on the spec metrics.
+            quota_selector = PromQLBuilder._selector("container_spec_cpu_quota", "", None)
+            period_selector = PromQLBuilder._selector("container_spec_cpu_period", "", None)
+
             # If quota is -1 (unlimited) we fall back to period alone,
             # which approximates "1 core" and prevents division by zero.
             return (
-                f"sum(rate({usage_selector}[{window}])) by ({label}) "
+                f"sum(rate({usage_selector}[{window}])) by ({container_label}) "
                 f"/ "
                 f"sum("
                 f"  {quota_selector} / {period_selector} "
                 f"  or "
                 f"  {period_selector} / {period_selector}"  # == 1 when quota == -1
-                f") by ({label})"
+                f") by ({container_label})"
             )
         else:
             # Node or process path — irate gives per-second usage.
@@ -235,7 +257,7 @@ class PromQLBuilder:
     def _memory_usage_percent(schema: LabelSchema, window: str, matchers: Matchers) -> str:
         mem_metric = schema.memory_metric
         label = schema.process_group_label
-        
+
         if "container_memory" in mem_metric:
             usage = PromQLBuilder._selector(mem_metric, "", matchers)
             limit = PromQLBuilder._selector(schema.memory_limit_metric or "container_spec_memory_limit_bytes", "", matchers)
@@ -254,10 +276,10 @@ class PromQLBuilder:
         disk_metric = schema.disk_metric
         disk_pair = schema.disk_pair_metric
         label = schema.process_group_label
-        
+
         if not disk_metric or not disk_pair:
             return 'vector(0) * 0'  # Gracefully return no data
-            
+
         if "container_fs" in disk_metric:
             usage = PromQLBuilder._selector(disk_metric, "", matchers)
             limit = PromQLBuilder._selector(disk_pair, "", matchers)
