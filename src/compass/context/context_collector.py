@@ -9,6 +9,8 @@ from compass.ingestion.adaptors.loki.loki_adaptor import LokiAdaptor
 from compass.ingestion.adaptors.prometheous.prom_adaptor import PrometheusAdapter
 from compass.ingestion.adaptors.prometheous.prom_models import ArchitectureMode, MetricType, MetricsContext
 
+CONTEXT_COLLECTOR_STATE_KEY = "context_collector"
+
 
 @dataclass
 class CollectorResult:

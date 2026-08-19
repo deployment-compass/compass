@@ -2,17 +2,16 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI,Request,Depends,Response, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status,Query
 from typing import Optional
 from compass.api import webhooks 
 from compass.ingestion.event_collector import collector
 from compass.ingestion.adaptors.prometheous.prom_adaptor import PrometheusAdapter
 from compass.ingestion.adaptors.loki.loki_adaptor import LokiAdaptor
-from compass.context.context_collector import ContextCollector,CollectorResult
+from compass.context.context_collector import CONTEXT_COLLECTOR_STATE_KEY, ContextCollector,CollectorResult
 from compass.config import settings
 from compass.schemas.response import BatchContextResponse,ContextResponse,ServiceListResponse
 import asyncio
-from functools import lru_cache
 
 import uvicorn
 
@@ -41,6 +40,7 @@ async def lifespan(app: FastAPI):
         schema_cache_ttl_seconds=settings.loki_cache_ttl_seconds,
     )
     setattr(app.state, _LOKI_KEY_, loki_adaptor)
+    setattr(app.state, CONTEXT_COLLECTOR_STATE_KEY, ContextCollector(prom_adapter, loki_adaptor))
 
     yield
     # cleanup event collector
@@ -59,6 +59,7 @@ async def lifespan(app: FastAPI):
     if loki_adaptor is not None:
         await loki_adaptor.aclose()
         setattr(app.state, _LOKI_KEY_, None)
+    setattr(app.state, CONTEXT_COLLECTOR_STATE_KEY, None)
 
 app = FastAPI(
     title="Compass",
@@ -68,7 +69,6 @@ app = FastAPI(
 
 # getter for the adapters
 
-@lru_cache
 def get_prometheus_adapter(request: Request) -> PrometheusAdapter:
     """
     FastAPI dependency — inject with `Depends(get_prometheus_adapter)`.
@@ -80,7 +80,6 @@ def get_prometheus_adapter(request: Request) -> PrometheusAdapter:
         )
     return adapter
 
-@lru_cache
 def get_loki_adapter(request: Request) -> LokiAdaptor:
     """FastAPI dependency — inject with Depends(get_loki_adapter)."""
     adapter: Optional[LokiAdaptor] = getattr(request.app.state, _LOKI_KEY_, None)
@@ -92,9 +91,14 @@ def get_loki_adapter(request: Request) -> LokiAdaptor:
         )
     return adapter
 
-@lru_cache
-def get_context_builder() -> ContextCollector:
-    return ContextCollector(get_prometheus_adapter(), get_loki_adapter())
+def get_context_builder(request: Request) -> ContextCollector:
+    """Return the shared collector wired to the application's pull adapters."""
+    collector: ContextCollector | None = getattr(
+        request.app.state, CONTEXT_COLLECTOR_STATE_KEY, None
+    )
+    if collector is None:
+        raise RuntimeError("ContextCollector is not attached to app.state")
+    return collector
 
 
 
