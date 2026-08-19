@@ -13,6 +13,14 @@ from .promql_builder import PromQLBuilder
 
 ALL_METRICS: tuple[MetricType, ...] = tuple(MetricType)
 _TARGET_LABEL_FALLBACKS = ("service", "app", "job", "instance", "handler", "route", "endpoint")
+_INFRASTRUCTURE_METRICS = frozenset(
+    {
+        MetricType.CPU_USAGE,
+        MetricType.MEMORY_USAGE,
+        MetricType.MEMORY_USAGE_PERCENT,
+        MetricType.DISK_USAGE_PERCENT,
+    }
+)
 
 
 class PrometheusAdapter:
@@ -69,10 +77,11 @@ class PrometheusAdapter:
         label_key = self._label_for(metric, schema)
         matchers = self._target_matchers(schema, label_key, service, environment)
         value = await self._query_with_fallbacks(metric, schema, window, matchers, label_key)
-        if value is not None or metric not in (MetricType.CPU_USAGE, MetricType.MEMORY_USAGE):
+        if value is not None or metric not in _INFRASTRUCTURE_METRICS:
             return value
-        # Node-level metrics are frequently labeled only by instance. Keep this
-        # best-effort fallback limited to generic infrastructure measurements.
+        # Node-exporter and cAdvisor infrastructure metrics frequently do not
+        # carry the application's service label.  Retry without that matcher so
+        # the response can include the node/container hosting the service.
         relaxed = {key: value for key, value in matchers.items() if key != label_key}
         return await self._query_with_fallbacks(metric, schema, window, relaxed, label_key)
 
