@@ -71,24 +71,42 @@ class PrometheusAdapter:
         self._ensure_client()
         return await self._discovery.discover(force=force_refresh)
 
-    async def query(self, service: str, environment: str, window_seconds: int) -> dict[str, Optional[float]]:
-        """Return the same logical metric keys in local and Kubernetes deployments.
-        
-        Executes concurrent instant queries for every supported metric for a specific target service.
+    async def query(
+        self, service: str, environment: str, window_seconds: int
+    ) -> dict[str, object]:
+        """Return metric scalars plus a ``_k8s`` key with label metadata.
+
+        The ``_k8s`` dict contains ``namespace``, ``pod``, and ``container``
+        extracted from the first matching Prometheus vector result for the CPU
+        metric (the most likely to carry container-level labels).  All three
+        default to ``None`` when labels are absent (MONOLITH / process-exporter
+        setups do not expose these labels).
+
+        Executes concurrent instant queries for every supported metric for a
+        specific target service.
         """
         schema = await self.get_schema()
-        
+        window = f"{window_seconds}s"
+
         # Concurrently execute queries for all metrics, safely catching exceptions per query
         values = await asyncio.gather(
-            *(self._query_one(metric, schema, f"{window_seconds}s", service, environment) for metric in ALL_METRICS),
+            *(self._query_one(metric, schema, window, service, environment) for metric in ALL_METRICS),
             return_exceptions=True,
         )
-        
-        # Format the output into a dictionary mapping metric names to values (or None if failed)
-        return {
+
+        # Scalar metric map — metric_name → float | None
+        result: dict[str, object] = {
             metric.value: None if isinstance(value, Exception) else value
             for metric, value in zip(ALL_METRICS, values)
         }
+
+        # K8s label enrichment: run a lightweight vector query for the CPU
+        # metric (cAdvisor carries namespace/pod/container on every series).
+        # Falls back gracefully to all-None when labels are not present.
+        result["_k8s"] = await self._extract_k8s_labels(
+            schema, window, service, environment
+        )
+        return result
 
     async def _query_one(
         self, metric: MetricType, schema: LabelSchema, window: str, service: str, environment: str
@@ -105,8 +123,47 @@ class PrometheusAdapter:
         # Node-exporter and cAdvisor infrastructure metrics frequently do not
         # carry the application's service label. Retry without that matcher so
         # the response can include the node/container hosting the service.
-        relaxed = {key: value for key, value in matchers.items() if key != label_key}
+        relaxed = {key: v for key, v in matchers.items() if key != label_key}
         return await self._query_with_fallbacks(metric, schema, window, relaxed, label_key)
+
+    async def _extract_k8s_labels(
+        self, schema: LabelSchema, window: str, service: str, environment: str
+    ) -> dict[str, Optional[str]]:
+        """Extract K8s label metadata (namespace/pod/container) for the target service.
+
+        Runs a single vector query against the CPU metric (which is the most
+        likely series to carry container-level labels in a Kubernetes setup)
+        and reads the K8s labels from the first matching result entry.
+
+        Returns a dict with keys ``namespace``, ``pod``, ``container`` — all
+        ``None`` when the target does not expose these labels (MONOLITH mode).
+        """
+        empty: dict[str, Optional[str]] = {"namespace": None, "pod": None, "container": None}
+
+        # Only attempt enrichment when the schema has at least one K8s label.
+        if not any([schema.namespace_label, schema.pod_label, schema.container_label]):
+            return empty
+
+        try:
+            label_key = self._label_for(MetricType.CPU_USAGE, schema)
+            matchers = self._target_matchers(schema, label_key, service, environment)
+            promql = PromQLBuilder.build(MetricType.CPU_USAGE, schema, window, matchers)
+            response = await self._client.get(
+                f"{self._base_url}/api/v1/query", params={"query": promql}
+            )
+            response.raise_for_status()
+            results = response.json().get("data", {}).get("result", [])
+            if not results:
+                return empty
+            # Pick the first series that matches the target service label.
+            labels = results[0].get("metric", {})
+            return {
+                "namespace": labels.get(schema.namespace_label) if schema.namespace_label else None,
+                "pod": labels.get(schema.pod_label) if schema.pod_label else None,
+                "container": labels.get(schema.container_label) if schema.container_label else None,
+            }
+        except Exception:  # noqa: BLE001
+            return empty
     
     async def list_services(self, force_refresh: bool = False) -> set[str]:
         """Discover distinct service/app names via the schema's HTTP group label."""

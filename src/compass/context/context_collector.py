@@ -64,13 +64,17 @@ class ContextCollector:
         log_task = self._loki.query(service, environment, window_seconds) if self._loki else None
         
         # Concurrently gather task results; return_exceptions=True prevents one failed task from crashing both
-        results = await asyncio.gather(metric_task, *( [log_task] if log_task else [] ), return_exceptions=True)
+        results = await asyncio.gather(metric_task, *([log_task] if log_task else []), return_exceptions=True)
 
         # Process Prometheus metrics query results and error state
         metric_result = results[0]
         had_metric_errors = isinstance(metric_result, Exception)
-        metric_values = {} if had_metric_errors else metric_result
-        
+        metric_values: dict[str, object] = {} if had_metric_errors else metric_result
+
+        # Extract K8s label metadata bundled under "_k8s" by the updated prom_adaptor.query().
+        # pop() removes the private key so it doesn't pollute downstream metric lookups.
+        k8s_meta: dict[str, object] = metric_values.pop("_k8s", {}) if isinstance(metric_values, dict) else {}
+
         # Attempt to inspect schema architecture mode; fall back gracefully on failure
         try:
             schema = await self._prometheus.get_schema()
@@ -99,6 +103,11 @@ class ContextCollector:
                 cpu_usage=metric_values.get(MetricType.CPU_USAGE.value),
                 memory_usage=metric_values.get(MetricType.MEMORY_USAGE.value),
                 architecture=architecture,
+                # K8s enrichment — populated when Prometheus exposes container-level labels
+                # (MICROSERVICE/cAdvisor mode). Remains None in MONOLITH/process-exporter mode.
+                namespace=k8s_meta.get("namespace"),
+                pod=k8s_meta.get("pod"),
+                container=k8s_meta.get("container"),
             ),
             log_signals=log_signals,
             log_lines=log_lines,
@@ -107,11 +116,10 @@ class ContextCollector:
         )
 
     async def build_with_k8s_enrichment(self, service: str, environment: str, window_seconds: int = 300) -> CollectorResult:
-        """Compatibility alias; optional K8s fields come from Prometheus samples when available."""
+        """Compatibility alias; K8s fields are now populated automatically by build()."""
         return await self.build(service, environment, window_seconds)
-    
-    
-    
+
+
     async def discover_services(self, force_refresh: bool = False) -> set[str]:
         """Union of services visible to Prometheus and  Loki."""
         prom_task = self._prometheus.list_services(force_refresh=force_refresh)

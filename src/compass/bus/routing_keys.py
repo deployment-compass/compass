@@ -14,6 +14,7 @@ class BusComponent(StrEnum):
 
     EVENT_NORMALIZER = "event_normalizer"
     INVESTIGATION_WINDOW = "investigation_window"
+    TRAINING_TRIGGER = "training_trigger"
 
 
 class RoutingKeys:
@@ -22,11 +23,13 @@ class RoutingKeys:
     INGEST_NORMALIZED = "compass.ingest.normalized"
     # Kept deliberately spelled ``anomly`` to match the Layer 2 contract.
     INGEST_NORMALIZED_ANOMLY = "compass.ingest.normalized.anomly"
+    TRAINING_TRIGGER = "compass.training.trigger"
 
 
 _COMPONENT_ROUTING_KEYS: dict[BusComponent, str] = {
     BusComponent.EVENT_NORMALIZER: RoutingKeys.INGEST_NORMALIZED,
     BusComponent.INVESTIGATION_WINDOW: RoutingKeys.INGEST_NORMALIZED_ANOMLY,
+    BusComponent.TRAINING_TRIGGER: RoutingKeys.TRAINING_TRIGGER,
 }
 
 

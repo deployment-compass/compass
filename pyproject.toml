@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "aio-pika>=10.0.1",
+    "kubernetes-asyncio>=24.2.3",
     "alembic>=1.19.0",
     "fastapi[standard]>=0.141.1",
     "httpx>=0.28.1",

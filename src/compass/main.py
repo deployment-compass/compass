@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status,Query
 from typing import Optional
-from compass.api import webhooks 
+
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status, Query
+
+from compass.api import webhooks, training
 from compass.ingestion.event_collector import collector
+from compass.ingestion.kubernetes_watcher import KubernetesWatcher
 from compass.ingestion.adaptors.prometheous.prom_adaptor import PrometheusAdapter
 from compass.ingestion.adaptors.loki.loki_adaptor import LokiAdaptor
-from compass.context.context_collector import CONTEXT_COLLECTOR_STATE_KEY, ContextCollector,CollectorResult
+from compass.context.context_collector import CONTEXT_COLLECTOR_STATE_KEY, ContextCollector, CollectorResult
 from compass.config import settings
-from compass.schemas.response import BatchContextResponse,ContextResponse,ServiceListResponse
+from compass.schemas.response import BatchContextResponse, ContextResponse, ServiceListResponse
 import asyncio
 
 import uvicorn
@@ -23,17 +25,21 @@ _LOKI_KEY_ = "loki_adapter"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # init event collector
+    # ------------------------------------------------------------------ #
+    # Startup                                                              #
+    # ------------------------------------------------------------------ #
+
+    # 1. Event collector (must be up before any watcher or webhook handler)
     await collector.start()
-    
-    # Initialize adapters instance on application startup
+
+    # 2. Pull adapters
     prom_adapter = PrometheusAdapter(
         base_url=settings.prometheus_url,
         timeout_seconds=settings.prometheus_timeout_seconds,
         schema_cache_ttl_seconds=settings.prometheus_cache_ttl_seconds,
     )
     setattr(app.state, _PROM_KEY_, prom_adapter)
-    
+
     loki_adaptor = LokiAdaptor(
         base_url=settings.loki_url,
         timeout_seconds=settings.loki_timeout_seconds,
@@ -42,23 +48,40 @@ async def lifespan(app: FastAPI):
     setattr(app.state, _LOKI_KEY_, loki_adaptor)
     setattr(app.state, CONTEXT_COLLECTOR_STATE_KEY, ContextCollector(prom_adapter, loki_adaptor))
 
+    # 3. In-process Kubernetes watch loop (optional, off by default)
+    k8s_watcher: KubernetesWatcher | None = None
+    if settings.k8s_watch_enabled:
+        k8s_watcher = KubernetesWatcher(
+            namespaces=settings.k8s_namespaces or None,
+            kubeconfig=settings.k8s_kubeconfig,
+            reconnect_delay_seconds=settings.k8s_watch_reconnect_delay_seconds,
+        )
+        await k8s_watcher.start()
+
     yield
-    # cleanup event collector
-    
+
+    # ------------------------------------------------------------------ #
+    # Shutdown                                                             #
+    # ------------------------------------------------------------------ #
+
+    # 1. Stop K8s watcher first so it stops enqueuing before the collector drains
+    if k8s_watcher is not None:
+        await k8s_watcher.stop()
+
+    # 2. Drain and stop the event collector
     await collector.stop()
-    
-    # clean up prom adaptor
-    prom_adapter: Optional[PrometheusAdapter] = getattr(app.state, _PROM_KEY_, None)
-    if prom_adapter is not None:
-        await prom_adapter.aclose()
-    setattr(app.state, _PROM_KEY_, None) 
-    
-    # clean up loki adaptor
-    loki_adaptor: Optional[LokiAdaptor] = getattr(app.state, _LOKI_KEY_, None)
-        
-    if loki_adaptor is not None:
-        await loki_adaptor.aclose()
-        setattr(app.state, _LOKI_KEY_, None)
+
+    # 3. Clean up pull adapters
+    prom_adapter_shutdown: Optional[PrometheusAdapter] = getattr(app.state, _PROM_KEY_, None)
+    if prom_adapter_shutdown is not None:
+        await prom_adapter_shutdown.aclose()
+    setattr(app.state, _PROM_KEY_, None)
+
+    loki_adaptor_shutdown: Optional[LokiAdaptor] = getattr(app.state, _LOKI_KEY_, None)
+    if loki_adaptor_shutdown is not None:
+        await loki_adaptor_shutdown.aclose()
+    setattr(app.state, _LOKI_KEY_, None)
+
     setattr(app.state, CONTEXT_COLLECTOR_STATE_KEY, None)
 
 app = FastAPI(
@@ -114,6 +137,7 @@ def _to_context_response(service: str, environment: str, result: CollectorResult
 # routers 
   
 app.include_router(webhooks.router)
+app.include_router(training.router)
 
 # root endPoints
 
