@@ -147,21 +147,31 @@ class PrometheusAdapter:
         try:
             label_key = self._label_for(MetricType.CPU_USAGE, schema)
             matchers = self._target_matchers(schema, label_key, service, environment)
-            promql = PromQLBuilder.build(MetricType.CPU_USAGE, schema, window, matchers)
-            response = await self._client.get(
-                f"{self._base_url}/api/v1/query", params={"query": promql}
-            )
-            response.raise_for_status()
-            results = response.json().get("data", {}).get("result", [])
-            if not results:
-                return empty
-            # Pick the first series that matches the target service label.
-            labels = results[0].get("metric", {})
-            return {
-                "namespace": labels.get(schema.namespace_label) if schema.namespace_label else None,
-                "pod": labels.get(schema.pod_label) if schema.pod_label else None,
-                "container": labels.get(schema.container_label) if schema.container_label else None,
-            }
+
+            # Query un-aggregated metric selectors so Prometheus returns full series label metadata.
+            # (Standard PromQLBuilder.build uses 'by (...)' which strips non-grouping labels).
+            candidate_metrics = [
+                schema.cpu_metric,
+                "container_cpu_usage_seconds_total",
+                "http_requests_total",
+            ]
+            for metric_name in candidate_metrics:
+                if not metric_name:
+                    continue
+                promql = PromQLBuilder.with_matchers(metric_name, matchers)
+                response = await self._client.get(
+                    f"{self._base_url}/api/v1/query", params={"query": promql}
+                )
+                response.raise_for_status()
+                results = response.json().get("data", {}).get("result", [])
+                if results:
+                    labels = results[0].get("metric", {})
+                    ns = labels.get(schema.namespace_label) if schema.namespace_label else None
+                    po = labels.get(schema.pod_label) if schema.pod_label else None
+                    co = labels.get(schema.container_label) if schema.container_label else None
+                    if any([ns, po, co]):
+                        return {"namespace": ns, "pod": po, "container": co}
+            return empty
         except Exception:  # noqa: BLE001
             return empty
     

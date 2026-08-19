@@ -38,9 +38,15 @@ _PROCESS_LABEL_CANDIDATES = ["service", "job", "instance"]
 _ENVIRONMENT_LABEL_CANDIDATES = ["environment", "env", "deployment_environment"]
 
 # Kubernetes-specific labels.
-_K8S_NAMESPACE_LABEL_CANDIDATES = ["namespace", "kube_namespace"]
-_K8S_POD_LABEL_CANDIDATES = ["pod", "pod_name", "kube_pod"]
-_K8S_CONTAINER_LABEL_CANDIDATES = ["container", "container_name"]
+_K8S_NAMESPACE_LABEL_CANDIDATES = [
+    "namespace", "kube_namespace", "kubernetes_namespace", "exported_namespace"
+]
+_K8S_POD_LABEL_CANDIDATES = [
+    "pod", "pod_name", "kube_pod", "kubernetes_pod", "exported_pod"
+]
+_K8S_CONTAINER_LABEL_CANDIDATES = [
+    "container", "container_name", "kube_container", "kubernetes_container", "exported_container"
+]
 
 # ------------------------------------------------------------------
 # Metric candidates are tuples of (metric_name, implied_architecture).
