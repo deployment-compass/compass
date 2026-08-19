@@ -38,6 +38,8 @@ class CollectorResult:
             "p95_latency": self.metrics.p95_latency,
             "cpu_usage": self.metrics.cpu_usage,
             "memory_usage": self.metrics.memory_usage,
+            "memory_usage_percent": self.metrics.memory_usage_percent,
+            "disk_usage_percent": self.metrics.disk_usage_percent,
             "namespace": self.metrics.namespace,
             "pod": self.metrics.pod,
             "container": self.metrics.container,
@@ -102,6 +104,8 @@ class ContextCollector:
                 p95_latency=metric_values.get(MetricType.P95_LATENCY.value),
                 cpu_usage=metric_values.get(MetricType.CPU_USAGE.value),
                 memory_usage=metric_values.get(MetricType.MEMORY_USAGE.value),
+                memory_usage_percent=metric_values.get(MetricType.MEMORY_USAGE_PERCENT.value),
+                disk_usage_percent=metric_values.get(MetricType.DISK_USAGE_PERCENT.value),
                 architecture=architecture,
                 # K8s enrichment — populated when Prometheus exposes container-level labels
                 # (MICROSERVICE/cAdvisor mode). Remains None in MONOLITH/process-exporter mode.

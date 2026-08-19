@@ -56,6 +56,10 @@ class PromQLBuilder:
             return PromQLBuilder._cpu_usage(schema, window, target_matchers)
         if metric is MetricType.MEMORY_USAGE:
             return PromQLBuilder._memory_usage(schema, window, target_matchers)
+        if metric is MetricType.MEMORY_USAGE_PERCENT:
+            return PromQLBuilder._memory_usage_percent(schema, window, target_matchers)
+        if metric is MetricType.DISK_USAGE_PERCENT:
+            return PromQLBuilder._disk_usage_percent(schema, window, target_matchers)
         raise ValueError(f"Unsupported metric type: {metric!r}")
 
     @staticmethod
@@ -226,6 +230,44 @@ class PromQLBuilder:
             # Process-level RSS — straightforward gauge.
             selector = PromQLBuilder._selector(mem_metric, "", matchers)
             return f"sum({selector}) by ({label})"
+
+    @staticmethod
+    def _memory_usage_percent(schema: LabelSchema, window: str, matchers: Matchers) -> str:
+        mem_metric = schema.memory_metric
+        label = schema.process_group_label
+        
+        if "container_memory" in mem_metric:
+            usage = PromQLBuilder._selector(mem_metric, "", matchers)
+            limit = PromQLBuilder._selector(schema.memory_limit_metric or "container_spec_memory_limit_bytes", "", matchers)
+            return f"sum({usage}) by ({label}) / sum({limit} > 0) by ({label})"
+        elif "node_memory" in mem_metric:
+            total = PromQLBuilder._selector(schema.memory_total_metric or "node_memory_MemTotal_bytes", "", matchers)
+            avail = PromQLBuilder._selector(mem_metric, "", matchers)
+            return f"(sum({total}) by ({label}) - sum({avail}) by ({label})) / sum({total} > 0) by ({label})"
+        else:
+            usage = PromQLBuilder._selector(mem_metric, "", matchers)
+            total = PromQLBuilder._selector(schema.memory_total_metric or "node_memory_MemTotal_bytes", "", matchers)
+            return f"sum({usage}) by ({label}) / sum({total} > 0) by ({label})"
+
+    @staticmethod
+    def _disk_usage_percent(schema: LabelSchema, window: str, matchers: Matchers) -> str:
+        disk_metric = schema.disk_metric
+        disk_pair = schema.disk_pair_metric
+        label = schema.process_group_label
+        
+        if not disk_metric or not disk_pair:
+            return 'vector(0) * 0'  # Gracefully return no data
+            
+        if "container_fs" in disk_metric:
+            usage = PromQLBuilder._selector(disk_metric, "", matchers)
+            limit = PromQLBuilder._selector(disk_pair, "", matchers)
+            return f"sum({usage}) by ({label}) / sum({limit} > 0) by ({label})"
+        else:
+            mp = schema.disk_mountpoint_label
+            mp_filter = f'{mp}="/"' if mp else ""
+            avail = PromQLBuilder._selector(disk_metric, mp_filter, matchers)
+            size = PromQLBuilder._selector(disk_pair, mp_filter, matchers)
+            return f"(sum({size}) by ({label}) - sum({avail}) by ({label})) / sum({size} > 0) by ({label})"
 
     # -----------------------------------------------------------------
     # Shared helper: append label selectors to a metric name
