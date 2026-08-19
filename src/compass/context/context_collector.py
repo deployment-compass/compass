@@ -11,7 +11,8 @@ from compass.ingestion.adaptors.prometheous.prom_models import ArchitectureMode,
 
 
 @dataclass
-class BuilderResult:
+class CollectorResult:
+    """Container holding aggregated metrics, log signals, raw log lines, and failure flags."""
     metrics: MetricsContext
     log_signals: dict[str, Optional[float]] = field(default_factory=dict)
     # Retained for callers using the former LokiAdaptor response. New LokiAdaptor
@@ -22,7 +23,11 @@ class BuilderResult:
 
     @property
     def context(self) -> dict[str, object]:
-        """Flat, source-neutral input for the anomaly model."""
+        """Flat, source-neutral input for the anomaly model.
+        
+        Flattens core metric attributes and dynamically merges log signal key-value pairs 
+        into a unified dictionary payload consumed by downstream anomaly detection algorithms.
+        """
         return {
             "service": self.metrics.service,
             "environment": self.metrics.environment,
@@ -38,19 +43,33 @@ class BuilderResult:
         }
 
 
-class ContextBuilder:
+class ContextCollector:
+    """Coordinates concurrent fetching of telemetry data from Prometheus and Loki adapters."""
+
     def __init__(self, prometheus_adapter: PrometheusAdapter, loki_adapter: Optional[LokiAdaptor] = None):
+        """Initialize the context builder with required Prometheus and optional Loki data source adapters."""
         self._prometheus = prometheus_adapter
         self._loki = loki_adapter
 
-    async def build(self, service: str, environment: str, window_seconds: int = 300) -> BuilderResult:
+    async def build(self, service: str, environment: str = 'prod', window_seconds: int = 300) -> CollectorResult:
+        """Fetch and aggregate observability data across metrics and logs into a CollectorResult.
+        
+        Executes query calls concurrently and safely catches adapter exceptions to allow 
+        partial context delivery even if one data source fails.
+        """
+        # Prepare asynchronous tasks for Prometheus metrics and optional Loki log collection
         metric_task = self._prometheus.query(service, environment, window_seconds)
         log_task = self._loki.query(service, environment, window_seconds) if self._loki else None
+        
+        # Concurrently gather task results; return_exceptions=True prevents one failed task from crashing both
         results = await asyncio.gather(metric_task, *( [log_task] if log_task else [] ), return_exceptions=True)
 
+        # Process Prometheus metrics query results and error state
         metric_result = results[0]
         had_metric_errors = isinstance(metric_result, Exception)
         metric_values = {} if had_metric_errors else metric_result
+        
+        # Attempt to inspect schema architecture mode; fall back gracefully on failure
         try:
             schema = await self._prometheus.get_schema()
             architecture = schema.architecture
@@ -58,13 +77,17 @@ class ContextBuilder:
             architecture = ArchitectureMode.UNKNOWN
             had_metric_errors = True
 
+        # Process Loki log query results and error state
         log_result = results[1] if log_task else {}
         had_log_errors = isinstance(log_result, Exception)
         log_result = {} if had_log_errors else log_result
+        
+        # Extract raw log text lines vs computed log metrics/signals
         log_lines = log_result.get("lines", [])
         log_signals = {key: value for key, value in log_result.items() if key != "lines"}
 
-        return BuilderResult(
+        # Construct and return the structured observability result
+        return CollectorResult(
             metrics=MetricsContext(
                 service=service,
                 environment=environment,
@@ -81,6 +104,41 @@ class ContextBuilder:
             had_log_errors=had_log_errors,
         )
 
-    async def build_with_k8s_enrichment(self, service: str, environment: str, window_seconds: int = 300) -> BuilderResult:
+    async def build_with_k8s_enrichment(self, service: str, environment: str, window_seconds: int = 300) -> CollectorResult:
         """Compatibility alias; optional K8s fields come from Prometheus samples when available."""
         return await self.build(service, environment, window_seconds)
+    
+    
+    
+    async def discover_services(self, force_refresh: bool = False) -> set[str]:
+        """Union of services visible to Prometheus and  Loki."""
+        prom_task = self._prometheus.list_services(force_refresh=force_refresh)
+        loki_task = self._loki.list_services(force_refresh=force_refresh) if self._loki else None
+
+        results = await asyncio.gather(
+            prom_task, *([loki_task] if loki_task else []), return_exceptions=True
+        )
+
+        prom_services = results[0] if not isinstance(results[0], Exception) else set()
+        loki_services = (
+            results[1] if loki_task and not isinstance(results[1], Exception) else set()
+        )
+        return prom_services | loki_services
+    
+    
+    async def build_all(
+        self, environment: str = "prod", window_seconds: int = 300, services: Optional[set[str]] = None
+    ) -> dict[str, CollectorResult]:
+        """Discover services (or use a caller-provided set) and build context for each concurrently."""
+        target_services = services if services is not None else await self.discover_services()
+
+        results = await asyncio.gather(
+            *(self.build(service, environment, window_seconds) for service in target_services),
+            return_exceptions=True,
+        )
+
+        return {
+            service: result
+            for service, result in zip(target_services, results)
+            if not isinstance(result, Exception)
+        }
